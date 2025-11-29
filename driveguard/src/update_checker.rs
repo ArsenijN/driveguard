@@ -75,59 +75,94 @@ impl UpdateChecker {
     }
     
     fn check_source(&self, manifest_url: &str) -> Result<UpdateInfo, String> {
-        // Call updater.exe to check for updates
-        let output = Command::new("updater.exe")
-            .arg("--check")
-            .arg(manifest_url)
-            .arg(get_current_version())
-            .output()
-            .map_err(|e| format!("Failed to run updater: {}", e))?;
+        // Try to find updater.exe in multiple locations
+        let updater_paths = vec![
+            "updater.exe",
+            "./updater.exe",
+            "../updater/target/debug/updater.exe",
+            "../updater/target/release/updater.exe",
+        ];
         
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut updater_found = false;
+        let mut last_error = String::new();
         
-        // Parse updater output
-        for line in stdout.lines() {
-            if line.starts_with("UPDATE_AVAILABLE:") {
-                let version = line.strip_prefix("UPDATE_AVAILABLE:").unwrap().to_string();
-                
-                // Check if it's a test version and if user allows them
-                let is_test_version = version.contains('r');
-                if is_test_version && !self.settings.allow_test_versions {
-                    log::info!("Skipping test version {} (test versions disabled)", version);
-                    return Err("Test version not allowed".to_string());
-                }
-                
-                // Parse additional info from following lines
-                let mut url = String::new();
-                let mut checksum = String::new();
-                let mut size = 0u64;
-                let mut breaking = false;
-                
-                for info_line in stdout.lines() {
-                    if info_line.starts_with("URL:") {
-                        url = info_line.strip_prefix("URL:").unwrap().to_string();
-                    } else if info_line.starts_with("CHECKSUM:") {
-                        checksum = info_line.strip_prefix("CHECKSUM:").unwrap().to_string();
-                    } else if info_line.starts_with("SIZE:") {
-                        size = info_line.strip_prefix("SIZE:").unwrap().parse().unwrap_or(0);
-                    } else if info_line.starts_with("BREAKING:") {
-                        breaking = info_line.strip_prefix("BREAKING:").unwrap() == "true";
+        for updater_path in updater_paths {
+            // Call updater to check for updates
+            match Command::new(updater_path)
+                .arg("--check")
+                .arg(manifest_url)
+                .arg(get_current_version())
+                .output()
+            {
+                Ok(output) => {
+                    updater_found = true;
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    
+                    log::debug!("Updater stdout: {}", stdout);
+                    if !stderr.is_empty() {
+                        log::debug!("Updater stderr: {}", stderr);
                     }
+                    
+                    // Parse updater output
+                    for line in stdout.lines() {
+                        if line.starts_with("UPDATE_AVAILABLE:") {
+                            let version = line.strip_prefix("UPDATE_AVAILABLE:").unwrap().to_string();
+                            
+                            // Check if it's a test version and if user allows them
+                            let is_test_version = version.contains('r');
+                            if is_test_version && !self.settings.allow_test_versions {
+                                log::info!("Skipping test version {} (test versions disabled)", version);
+                                return Err("Test version not allowed".to_string());
+                            }
+                            
+                            // Parse additional info from following lines
+                            let mut url = String::new();
+                            let mut checksum = String::new();
+                            let mut size = 0u64;
+                            let mut breaking = false;
+                            
+                            for info_line in stdout.lines() {
+                                if info_line.starts_with("URL:") {
+                                    url = info_line.strip_prefix("URL:").unwrap().to_string();
+                                } else if info_line.starts_with("CHECKSUM:") {
+                                    checksum = info_line.strip_prefix("CHECKSUM:").unwrap().to_string();
+                                } else if info_line.starts_with("SIZE:") {
+                                    size = info_line.strip_prefix("SIZE:").unwrap().parse().unwrap_or(0);
+                                } else if info_line.starts_with("BREAKING:") {
+                                    breaking = info_line.strip_prefix("BREAKING:").unwrap() == "true";
+                                }
+                            }
+                            
+                            return Ok(UpdateInfo {
+                                version,
+                                url,
+                                checksum,
+                                size_bytes: size,
+                                breaking_changes: breaking,
+                            });
+                        } else if line == "UP_TO_DATE" {
+                            return Err("Already up to date".to_string());
+                        }
+                    }
+                    
+                    if !stdout.is_empty() {
+                        log::error!("Updater output did not contain expected markers. Got {} bytes", stdout.len());
+                    }
+                    return Err("Failed to parse updater output".to_string());
                 }
-                
-                return Ok(UpdateInfo {
-                    version,
-                    url,
-                    checksum,
-                    size_bytes: size,
-                    breaking_changes: breaking,
-                });
-            } else if line == "UP_TO_DATE" {
-                return Err("Already up to date".to_string());
+                Err(e) => {
+                    last_error = format!("{}", e);
+                    log::debug!("Failed to run updater at {}: {}", updater_path, e);
+                    continue;
+                }
             }
         }
         
-        Err("Failed to parse updater output".to_string())
+        if !updater_found {
+            log::warn!("Updater executable not found in any expected location. Last error: {}", last_error);
+        }
+        Err("Failed to find or execute updater".to_string())
     }
     
     pub fn download_update(&self, info: &UpdateInfo) -> Result<String, String> {

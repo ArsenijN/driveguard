@@ -35,7 +35,6 @@ native-windows-gui = "1.0"
 native-windows-derive = "1.0"
 
 # Localization
-gettext = "0.4"
 lazy_static = "1.4"
 
 # Time handling
