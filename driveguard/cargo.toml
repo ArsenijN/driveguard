@@ -1,0 +1,52 @@
+[package]
+name = "driveguard"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Shared library
+driveguard-shared = { path = "../shared" }
+
+# Windows-specific dependencies
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_SystemServices",
+] }
+
+# Configuration and serialization
+toml = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# File system operations
+walkdir = "2.4"
+filetime = "0.2"
+
+# System tray
+trayicon = "0.1"
+
+# GUI framework
+native-windows-gui = "1.0"
+native-windows-derive = "1.0"
+
+# Localization
+gettext = "0.4"
+lazy_static = "1.4"
+
+# Time handling
+chrono = "0.4"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
